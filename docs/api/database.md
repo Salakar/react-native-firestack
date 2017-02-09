@@ -183,3 +183,12 @@ class ToDos extends Component {
 With persistence enabled, any calls to a ref with `.once` will always read the data from disk and not contact the server.
 On behavious differently, by first checking for a connection and if none exists returns the persisted data. If it successfully connects
 to the server, the new data will be returned and the disk data will be updated.
+
+The database refs has a `keepSynced()` function to tell the firestack library to keep the data at the `ref` in sync.
+
+```javascript
+const ref = firestack.database
+            .ref('chat-messages')
+            .child('roomId');
+ref.keepSynced(true);
+```
