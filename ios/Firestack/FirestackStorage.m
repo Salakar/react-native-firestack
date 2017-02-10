@@ -171,33 +171,118 @@ RCT_EXPORT_METHOD(putFile:(NSString *) path
                   metadata:(NSDictionary *)metadata
                   callback:(RCTResponseSenderBlock) callback)
 {
-    FIRStorageReference *fileRef = [self getReference:path];
-    FIRStorageMetadata *firmetadata = [[FIRStorageMetadata alloc] initWithDictionary:metadata];
-
     if ([localPath hasPrefix:@"assets-library://"]) {
         NSURL *localFile = [[NSURL alloc] initWithString:localPath];
         PHFetchResult* assets = [PHAsset fetchAssetsWithALAssetURLs:@[localFile] options:nil];
         PHAsset *asset = [assets firstObject];
 
-        [[PHImageManager defaultManager] requestImageDataForAsset:asset
-                                                          options:nil
-                                                    resultHandler:^(NSData * imageData, NSString * dataUTI, UIImageOrientation orientation, NSDictionary * info) {
-                                                        FIRStorageUploadTask *uploadTask = [fileRef putData:imageData
-                                                                                                   metadata:firmetadata];
-                                                        [self addUploadObservers:uploadTask
-                                                                            path:path
-                                                                        callback:callback];
-                                                    }];
+        //NOTE: This is all based on http://stackoverflow.com/questions/35241449
+        if (asset.mediaType == PHAssetMediaTypeImage && (asset.mediaSubtypes & PHAssetMediaSubtypePhotoLive)) {
+            //TODO: This is untested as I don't have an iPhone 6s/7
+            PHLivePhotoRequestOptions *options = [PHLivePhotoRequestOptions new];
+            options.networkAccessAllowed = YES;
+            [[PHImageManager defaultManager] requestLivePhotoForAsset:asset
+                                                           targetSize:CGSizeZero
+                                                          contentMode:PHImageContentModeAspectFill
+                                                              options:options
+                                                        resultHandler:^(PHLivePhoto * _Nullable livePhoto, NSDictionary * _Nullable info) {
+                                                            if ([info objectForKey:PHImageErrorKey] == nil) {
+                                                                NSData *livePhotoData = [NSKeyedArchiver archivedDataWithRootObject:livePhoto];
+                                                                [self uploadData:livePhotoData metadata:metadata path:path callback:callback];
+                                                            } else {
+                                                                NSDictionary *errProps = [[NSMutableDictionary alloc] init];
+                                                                [errProps setValue:@"Could not obtain live image data" forKey:@"message"];
+                                                                //TODO: Error event
+                                                                callback(@[errProps]);
+                                                            }
+            }];
+        } else if (asset.mediaType == PHAssetMediaTypeImage) {
+            PHImageRequestOptions *options = [PHImageRequestOptions new];
+            options.networkAccessAllowed = true;
+            [[PHImageManager defaultManager] requestImageDataForAsset:asset
+                                                              options:options
+                                                        resultHandler:^(NSData * imageData, NSString * dataUTI, UIImageOrientation orientation, NSDictionary * info) {
+                                                            if ([info objectForKey:PHImageErrorKey] == nil) {
+                                                                [self uploadData:imageData metadata:metadata path:path callback:callback];
+                                                            } else {
+                                                                NSDictionary *errProps = [[NSMutableDictionary alloc] init];
+                                                                [errProps setValue:@"Could not obtain image data" forKey:@"message"];
+                                                                //TODO: Error event
+                                                                callback(@[errProps]);
+                                                            }
+                                                        }];
+        } else if (asset.mediaType == PHAssetMediaTypeVideo) {
+            PHVideoRequestOptions *options = [PHVideoRequestOptions new];
+            options.networkAccessAllowed = true;
+            [[PHImageManager defaultManager] requestExportSessionForVideo:asset
+                                                                  options:options
+                                                             exportPreset:AVAssetExportPresetHighestQuality
+                                                            resultHandler:^(AVAssetExportSession * _Nullable exportSession, NSDictionary * _Nullable info) {
+                                                                if ([info objectForKey:PHImageErrorKey] == nil) {
+                                                                    NSURL *tempUrl = [self temporaryFileUrl];
+                                                                    exportSession.outputURL = tempUrl;
+
+                                                                    NSArray<PHAssetResource *> *resources = [PHAssetResource assetResourcesForAsset:asset];
+                                                                    for (PHAssetResource *resource in resources)
+                                                                    {
+                                                                        exportSession.outputFileType = resource.uniformTypeIdentifier;
+                                                                        if (exportSession.outputFileType != nil)
+                                                                            break;
+                                                                    }
+
+                                                                    [exportSession exportAsynchronouslyWithCompletionHandler:^{
+                                                                        if (exportSession.status == AVAssetExportSessionStatusCompleted)
+                                                                        {
+                                                                            [self uploadFile:tempUrl metadata:metadata path:path callback:callback];
+                                                                            //NOTE: we're not cleaning up the temporary file at the moment, just relying on the OS to do that in it's own time
+                                                                        } else {
+                                                                            NSDictionary *errProps = [[NSMutableDictionary alloc] init];
+                                                                            [errProps setValue:@"Could not create temporary file for upload" forKey:@"message"];
+                                                                            //TODO: Error event
+                                                                            callback(@[errProps]);
+                                                                        }
+                                                                    }];
+                                                                } else {
+                                                                    NSDictionary *errProps = [[NSMutableDictionary alloc] init];
+                                                                    [errProps setValue:@"Could not create export session for asset" forKey:@"message"];
+                                                                    //TODO: Error event
+                                                                    callback(@[errProps]);
+                                                                }
+                                                            }];
+        }
     } else {
-        NSURL *imageFile = [NSURL fileURLWithPath:localPath];
-        FIRStorageUploadTask *uploadTask = [fileRef putFile:imageFile
-                                                   metadata:firmetadata];
-        
-        [self addUploadObservers:uploadTask
-                            path:path
-                        callback:callback];
+        NSURL *fileUrl = [NSURL fileURLWithPath:localPath];
+        [self uploadFile:fileUrl metadata:metadata path:path callback:callback];
     }
 
+}
+
+- (NSURL *) temporaryFileUrl
+{
+    NSString *filename = [NSString stringWithFormat:@"%@.tmp", [[NSProcessInfo processInfo] globallyUniqueString]];
+    return [[NSURL fileURLWithPath:NSTemporaryDirectory()] URLByAppendingPathComponent:filename];
+}
+
+- (void) uploadFile:(NSURL *) url
+           metadata:(NSDictionary *) metadata
+               path:(NSString *) path
+           callback:(RCTResponseSenderBlock) callback
+{
+    FIRStorageReference *fileRef = [self getReference:path];
+    FIRStorageMetadata *firmetadata = [[FIRStorageMetadata alloc] initWithDictionary:metadata];
+    FIRStorageUploadTask *uploadTask = [fileRef putFile:url metadata:firmetadata];
+    [self addUploadObservers:uploadTask path:path callback:callback];
+}
+
+- (void) uploadData:(NSData *) data
+           metadata:(NSDictionary *) metadata
+               path:(NSString *) path
+           callback:(RCTResponseSenderBlock) callback
+{
+    FIRStorageReference *fileRef = [self getReference:path];
+    FIRStorageMetadata *firmetadata = [[FIRStorageMetadata alloc] initWithDictionary:metadata];
+    FIRStorageUploadTask *uploadTask = [fileRef putData:data metadata:firmetadata];
+    [self addUploadObservers:uploadTask path:path callback:callback];
 }
 
 - (void) addUploadObservers:(FIRStorageUploadTask *) uploadTask
