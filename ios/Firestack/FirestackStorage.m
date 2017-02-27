@@ -171,9 +171,15 @@ RCT_EXPORT_METHOD(putFile:(NSString *) path
                   metadata:(NSDictionary *)metadata
                   callback:(RCTResponseSenderBlock) callback)
 {
-    if ([localPath hasPrefix:@"assets-library://"]) {
-        NSURL *localFile = [[NSURL alloc] initWithString:localPath];
-        PHFetchResult* assets = [PHAsset fetchAssetsWithALAssetURLs:@[localFile] options:nil];
+    if ([localPath hasPrefix:@"assets-library://"] || [localPath hasPrefix:@"ph://"]) {
+        PHFetchResult* assets;
+        if ([localPath hasPrefix:@"assets-library://"]) {
+            NSURL *localFile = [[NSURL alloc] initWithString:localPath];
+            assets = [PHAsset fetchAssetsWithALAssetURLs:@[localFile] options:nil];
+        } else {
+            NSString *assetId = [localPath substringFromIndex:@"ph://".length];
+            assets = [PHAsset fetchAssetsWithLocalIdentifiers:@[assetId] options:nil];
+        }
         PHAsset *asset = [assets firstObject];
 
         //NOTE: This is all based on http://stackoverflow.com/questions/35241449
