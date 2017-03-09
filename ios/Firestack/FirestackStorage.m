@@ -24,7 +24,7 @@ RCT_EXPORT_MODULE(FirestackStorage);
 RCT_EXPORT_METHOD(delete: (NSString *) path
                   callback:(RCTResponseSenderBlock) callback)
 {
-    
+
     FIRStorageReference *fileRef = [self getReference:path];
     [fileRef deleteWithCompletion:^(NSError * _Nullable error) {
         if (error == nil) {
@@ -108,7 +108,7 @@ RCT_EXPORT_METHOD(downloadFile: (NSString *) path
 {
     FIRStorageReference *fileRef = [self getReference:path];
     NSURL *localFile = [NSURL fileURLWithPath:localPath];
-    
+
     FIRStorageDownloadTask *downloadTask = [fileRef writeToFile:localFile];
     // Listen for state changes, errors, and completion of the download.
     [downloadTask observeStatus:FIRStorageTaskStatusResume handler:^(FIRStorageTaskSnapshot *snapshot) {
@@ -116,7 +116,7 @@ RCT_EXPORT_METHOD(downloadFile: (NSString *) path
         NSDictionary *event = [self getDownloadTaskAsDictionary:snapshot];
         [self sendJSEvent:STORAGE_EVENT path:path title:STORAGE_STATE_CHANGED props:event];
     }];
-    
+
     [downloadTask observeStatus:FIRStorageTaskStatusPause handler:^(FIRStorageTaskSnapshot *snapshot) {
         // Download paused
         NSDictionary *event = [self getDownloadTaskAsDictionary:snapshot];
@@ -127,20 +127,20 @@ RCT_EXPORT_METHOD(downloadFile: (NSString *) path
         NSDictionary *event = [self getDownloadTaskAsDictionary:snapshot];
         [self sendJSEvent:STORAGE_EVENT path:path title:STORAGE_STATE_CHANGED props:event];
     }];
-    
+
     [downloadTask observeStatus:FIRStorageTaskStatusSuccess handler:^(FIRStorageTaskSnapshot *snapshot) {
         // Download completed successfully
         NSDictionary *resp = [self getDownloadTaskAsDictionary:snapshot];
-        
+
         [self sendJSEvent:STORAGE_EVENT path:path title:STORAGE_DOWNLOAD_SUCCESS props:resp];
         callback(@[[NSNull null], resp]);
     }];
-    
+
     [downloadTask observeStatus:FIRStorageTaskStatusFailure handler:^(FIRStorageTaskSnapshot *snapshot) {
         if (snapshot.error != nil) {
             NSDictionary *errProps = [[NSMutableDictionary alloc] init];
             NSLog(@"Error in download: %@", snapshot.error);
-            
+
             switch (snapshot.error.code) {
                 case FIRStorageErrorCodeObjectNotFound:
                     // File doesn't exist
@@ -159,7 +159,7 @@ RCT_EXPORT_METHOD(downloadFile: (NSString *) path
                     [errProps setValue:@"Unknown error" forKey:@"message"];
                     break;
             }
-            
+
             //TODO: Error event
             callback(@[errProps]);
         }}];
@@ -183,26 +183,7 @@ RCT_EXPORT_METHOD(putFile:(NSString *) path
         PHAsset *asset = [assets firstObject];
 
         //NOTE: This is all based on http://stackoverflow.com/questions/35241449
-        if (asset.mediaType == PHAssetMediaTypeImage && (asset.mediaSubtypes & PHAssetMediaSubtypePhotoLive)) {
-            //TODO: This is untested as I don't have an iPhone 6s/7
-            PHLivePhotoRequestOptions *options = [PHLivePhotoRequestOptions new];
-            options.networkAccessAllowed = YES;
-            [[PHImageManager defaultManager] requestLivePhotoForAsset:asset
-                                                           targetSize:CGSizeZero
-                                                          contentMode:PHImageContentModeAspectFill
-                                                              options:options
-                                                        resultHandler:^(PHLivePhoto * _Nullable livePhoto, NSDictionary * _Nullable info) {
-                                                            if ([info objectForKey:PHImageErrorKey] == nil) {
-                                                                NSData *livePhotoData = [NSKeyedArchiver archivedDataWithRootObject:livePhoto];
-                                                                [self uploadData:livePhotoData metadata:metadata path:path callback:callback];
-                                                            } else {
-                                                                NSDictionary *errProps = [[NSMutableDictionary alloc] init];
-                                                                [errProps setValue:@"Could not obtain live image data" forKey:@"message"];
-                                                                //TODO: Error event
-                                                                callback(@[errProps]);
-                                                            }
-            }];
-        } else if (asset.mediaType == PHAssetMediaTypeImage) {
+        if (asset.mediaType == PHAssetMediaTypeImage) {
             PHImageRequestOptions *options = [PHImageRequestOptions new];
             options.networkAccessAllowed = true;
             [[PHImageManager defaultManager] requestImageDataForAsset:asset
@@ -316,7 +297,7 @@ RCT_EXPORT_METHOD(putFile:(NSString *) path
     [uploadTask observeStatus:FIRStorageTaskStatusSuccess handler:^(FIRStorageTaskSnapshot *snapshot) {
         // Upload completed successfully
         NSDictionary *resp = [self getUploadTaskAsDictionary:snapshot];
-        
+
         [self sendJSEvent:STORAGE_EVENT path:path title:STORAGE_UPLOAD_SUCCESS props:resp];
         callback(@[[NSNull null], resp]);
     }];
@@ -464,7 +445,7 @@ RCT_EXPORT_METHOD(setMaxUploadRetryTime:(NSNumber *) milliseconds)
                                    @"path": path,
                                    @"body": props
                                    }];
-        
+
     }
     @catch (NSException *err) {
         NSLog(@"An error occurred in sendJSEvent: %@", [err debugDescription]);
